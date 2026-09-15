@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | `SKILL.md` | ゴール（OODA）・絶対に守ること・読み込み順・ウインドウ・重複防止・ページタイトル | 常に（最初） |
 | `templates/<lp\|pu\|fj>.md` | 変数表と11の差し込みブロック | 常に（最初） |
-| `references/collect.md` | 取得の原則 / 取得順と失敗時の代替 / 手順1（monitor）・2（アラート）・3（SLO）・4-a（トリガ判定）・6（ダッシュボード）/ 前週レポートの参照 | 手順1〜3 |
-| `references/metrics.md` | 手順5 の共通クエリ式（ECS の vCPU 正規化・`.rollup(avg, 3600)`・RDS・ALB） | 手順5 |
+| `references/collect.md` | 取得の原則、取得順と失敗時の代替、手順1（monitor）から 4-a（トリガ判定の decision table）、前週レポートの参照 | 手順1〜3 |
+| `references/query-catalog.md` | **クエリ文字列の正本**。常時取得と発火時のみ取得に分けた登録簿と、vCPU 正規化や rollup などの罠 | クエリを引くとき |
 | `references/investigate.md` | 手順4-c（トレース調査）・4-d（相関調査プレイブック） | **トリガ ON の週だけ** |
 | `references/evaluate.md` | 色の意味・総合ステータスの判定順序・severity の扱い・閾値 | 色を付けるとき |
 | `references/output.md` | 出力ルール・除外するもの・調査リンク規約・日本語表現・書き込み前の検証チェック | 書き始めるとき |
@@ -24,7 +24,7 @@
 | `targets` | collect.md 冒頭（SLO ID・ECS サービス名・RDS・ALB タグ・ダッシュボード） |
 | `monitors` | collect.md 手順1（monitor の本数・内訳・ID・monitor 不在リソース） |
 | `known-issues` | collect.md 手順6（ダッシュボード固有の既知事項） |
-| `metric-queries` | metrics.md 手順5（このプロダクトで取る対象） |
+| `query-catalog` | query-catalog.md（このプロダクトの対象と共通行への差分） |
 | `thresholds` | evaluate.md（閾値表と固有注記） |
 | `domain-notes` / `playbook-notes` | investigate.md（調査時のみ） |
 | `ledger` | report.md §3.1（台帳の表と脚注） |

@@ -55,6 +55,10 @@ Datadog と Notion を操作できる接続手段が利用環境にあること�
 
 **出力に `{{P.` / `{{P:` が1つでも残っていたら合成ミス。** 書き込み前に必ず確認する（`references/output.md` の検証チェック）。
 
+Datadog に投げるクエリは [`references/query-catalog.md`](references/query-catalog.md) に登録してある。
+カタログは**常時取得**と**発火時のみ取得**に分かれていて、後者はアプリ調査トリガが ON の週だけ引く。
+どのクエリも、単独で対応要否を判定する材料には使わない。
+
 ## 読み込み順
 
 **最初に `templates/<product>.md` を読む**（変数とブロックの供給元）。以降は必要になった時点で読む。**全部を先に読まない。**
@@ -63,8 +67,8 @@ Datadog と Notion を操作できる接続手段が利用環境にあること�
 | --- | --- |
 | 開始時（必ず） | `templates/<product>.md` |
 | 手順1〜3 に入るとき | `references/collect.md` |
-| 手順5 に入るとき | `references/metrics.md` |
-| **トリガ ON が確定したときだけ** | `references/investigate.md` ＋ `{{P:domain-notes}}` `{{P:playbook-notes}}` |
+| クエリを引くとき（必ず） | `references/query-catalog.md` |
+| **トリガ ON が確定したときだけ** | `references/investigate.md` ＋ カタログの「発火時のみ取得」 |
 | 色を付けるとき | `references/evaluate.md` |
 | 書き始めるとき | `templates/report.md` ＋ `references/output.md` |
 | メトリクスを取る前（必読） | `docs/datadog-mcp-tips.md` |
@@ -79,9 +83,9 @@ Datadog と Notion を操作できる接続手段が利用環境にあること�
 2. monitor 状態を一括取得（Observe の主軸）            → collect.md 手順1
 3. アラート発火イベントを収集（今週・先週）             → collect.md 手順2
 4. SLO の数値を取得                                  → collect.md 手順3
-5. アプリ調査トリガを判定                             → collect.md 手順4-a
+5. アプリ調査トリガを判定（decision table）            → collect.md 手順4-a
    └ ON なら investigate.md を読んで発火ウインドウを深掘り
-6. インフラ指標の週次値を取得（先週比トレンド用）        → metrics.md 手順5
+6. インフラ指標の週次値を取得（先週比トレンド用）        → query-catalog.md 常時取得
 7. 前週レポートを参照                                → collect.md §0.5
 8. 検証チェックを通してから Notion に出力              → output.md §0.9
 ```

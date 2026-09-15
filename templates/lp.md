@@ -96,14 +96,20 @@ monitor ID の全件表は [docs/monitors.md](../docs/monitors.md) にある。
 
 ---
 
-## {{P:metric-queries}}
+## {{P:query-catalog}}
 
-- **ECS（4サービス）**: API `procurement-production-api-service-w0bji1nrnqop`（8 GiB）/ Worker `procurement-production-worker-service-gwicbkyhasqz`（2 GiB）/ Worker-Long `procurement-production-worker-long-service-ucqjdrqmvu4a`（1 GiB）/ Worker-Mailer `procurement-production-worker-mailer-service-bsk312etaj9j`（1 GiB）
-- **ECS MultimodalAPI**（`procurement-production-multimodal-api-service-zcucozmazvpg`, 0.5 vCPU / 2 GiB）: 上の4サービスと同じ式・同じ `.rollup(avg, 3600)` で CPU % とメモリ % を取得する。⚠️ **CPU の正規化の分母は `cpu.task.limit / 1000000000` = `0.5`**（＝ raw 値の2倍が正規化値）。**ダッシュボードの「MultimodalAPI CPU使用率」ウィジェットは `cpu.percent / 2` という誤った式**（0.5 vCPU のタスクを 2 vCPU として扱っている）で、**真値の 1/4 を表示している**。ウィジェットの表示値を台帳に転記せず、必ずこの正規化式で取得し直す。
-- **RDS Writer / Reader**: タグ `{env:production, dbclusteridentifier:prd-ecs-db-cluster, role:<role>}`。
-- **RDS pgvector Writer**（タグ `{env:production, dbclusteridentifier:prd-multimodal-api-pgvector, role:writer}`）: `aws.rds.cpuutilization`（max / avg）/ `aws.rds.database_connections`（max / avg）/ `aws.rds.freeable_memory`（avg）/ `aws.rds.read_iops`・`aws.rds.write_iops`（avg）/ `aws.rds.buffer_cache_hit_ratio`（avg）。max を取る指標は Aurora MySQL 側と同じく `.rollup(avg, 3600)` をクエリに埋める。**このクラスタに Reader は存在しない**ので取得しない（`role:reader` は空になる）。
-- **ALB**: タグ `{service:procurement-api, env:production}`。
-- **Delayed::Job**: 件数・p50 は `trace.delayed_job{service:procurement-worker}`。
+LP 固有の対象と、共通行に対する差分。
+
+| ID | 目的 | 記載先 | 種別 | クエリ / 取得条件 | 集計・単位 | 欠損時 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ecs-mem` / `ecs-cpu` の対象 | ECS 4サービス | §3.1 台帳 | metrics | API `procurement-production-api-service-w0bji1nrnqop`（8 GiB）/ Worker `procurement-production-worker-service-gwicbkyhasqz`（2 GiB）/ Worker-Long `procurement-production-worker-long-service-ucqjdrqmvu4a`（1 GiB）/ Worker-Mailer `procurement-production-worker-mailer-service-bsk312etaj9j`（1 GiB） | 共通行と同じ | 行ごとに取得不可 |
+| `ecs-multimodal` | MultimodalAPI の CPU とメモリ（monitor なしの参考値） | §3.1 台帳 | metrics | `procurement-production-multimodal-api-service-zcucozmazvpg`（0.5 vCPU / 2 GiB）。式は `ecs-cpu` / `ecs-mem` と同じ | 共通行と同じ。⚠️ CPU 正規化の分母は `cpu.task.limit / 1000000000` = `0.5`（raw の2倍が正規化値） | 行ごとに取得不可 |
+| `rds-pg-*` | pgvector Writer の CPU、コネクション、空きメモリ、IOPS、キャッシュヒット率 | §3.1 台帳 | metrics | タグ `{env:production, dbclusteridentifier:prd-multimodal-api-pgvector, role:writer}`。`aws.rds.buffer_cache_hit_ratio` を追加で引く。max を取る指標は `.rollup(avg, 3600)` を埋める | 共通行と同じ | 行ごとに取得不可 |
+
+- **`rds-*` の対象クラスタ**：`prd-ecs-db-cluster`（Aurora MySQL, Writer/Reader）。
+- **pgvector に Reader は存在しない**ので `role:reader` は引かない（空になる）。
+- ⚠️ **ダッシュボードの「MultimodalAPI CPU使用率」ウィジェットは式が誤っている。** 0.5 vCPU のタスクに `cpu.percent / 2` を使っており、真値の 1/4 を表示する。ウィジェットの値を台帳に転記せず、必ず `ecs-cpu` の式で取得し直す。
+- **MultimodalAPI と pgvector には monitor が無い。** 判定対象外の参考値として台帳にのみ記録し、色を付けない。
 
 ---
 

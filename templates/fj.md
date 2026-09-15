@@ -100,12 +100,19 @@
 
 ---
 
-## {{P:metric-queries}}
+## {{P:query-catalog}}
 
-- **ECS（2サービス）**: API `connect-production-api-service-vqce1bfa4dby`（3 GiB ⚠️）/ Worker `connect-production-worker-service-vvkujofkxht0`（2 GiB）。⚠️ 素の `aggregator="max"` は瞬間生値ピーク（API CPU 84% / 101% 等）を拾うので `.rollup(avg, 3600)` を必ず埋める。
-- **RDS Writer / Reader**: タグ `{env:production, dbclusteridentifier:rds-connect-production, role:<role>}`。
-- **ALB**: タグ `{service:connect-api, env:production}`。**target_*（アプリ到達 = SLO 主軸）と elb_*（ALB レイヤ自身 = 防御シグナル含む）を分けて取得する**（既知事項4参照）。
-- **ActiveJob**: 件数・p50 は `trace.active_job.perform{service:connect-worker,env:production}`。`solidqueue::recurringjob` と `activestorage::purgejob` は除外する。
+FJ 固有の対象と、共通行に対する差分。
+
+| ID | 目的 | 記載先 | 種別 | クエリ / 取得条件 | 集計・単位 | 欠損時 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ecs-mem` / `ecs-cpu` の対象 | ECS 2サービス | §3.1 台帳 | metrics | API `connect-production-api-service-vqce1bfa4dby`（3 GiB ⚠️）/ Worker `connect-production-worker-service-vvkujofkxht0`（2 GiB） | 共通行と同じ | 行ごとに取得不可 |
+| `alb-code` の差分 | target と elb を分けて取得する | §3.1 台帳 | metrics | `httpcode_target_*xx`（アプリ到達 = SLO 主軸）と `httpcode_elb_*xx`（ALB レイヤ自身 = 防御シグナル含む）を**別々に**引く | 共通行と同じ | 行ごとに取得不可 |
+
+- **`rds-*` の対象クラスタ**：`rds-connect-production`（Aurora, Writer/Reader）。
+- **`job-latency` / `job-hits` の除外**：`solidqueue::recurringjob` と `activestorage::purgejob` は劣化調査と Decide 候補から外す。
+- ⚠️ 素の `aggregator="max"` は瞬間生値ピーク（API CPU 84% / 101% など）を拾うので、`.rollup(avg, 3600)` を必ず埋める。
+- **`elb_4xx` は防御シグナルを含む**ので、量と推移のみ確認し、単独で対応要否の判定に使わない。
 
 ---
 

@@ -90,12 +90,16 @@
 
 ---
 
-## {{P:metric-queries}}
+## {{P:query-catalog}}
 
-- **ECS（2サービス）**: API `purchasing-production-api-service-t7be14m1403n`（8 GiB）/ Worker `purchasing-production-worker-service-ydlu96mimsfg`（2 GiB）
-- **RDS Writer / Reader**: タグ `{env:production, dbclusteridentifier:catalog-db-prd, role:<role>}`。
-- **ALB**: タグ `{service:purchasing-api, env:production}`。
-- **ActiveJob**: 件数・p50 は `trace.active_job.perform{service:purchasing-worker,env:production}`。`solidqueue::recurringjob` と `activestorage::purgejob` は除外する。
+PU 固有の対象。
+
+| ID | 目的 | 記載先 | 種別 | クエリ / 取得条件 | 集計・単位 | 欠損時 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ecs-mem` / `ecs-cpu` の対象 | ECS 2サービス | §3.1 台帳 | metrics | API `purchasing-production-api-service-t7be14m1403n`（8 GiB）/ Worker `purchasing-production-worker-service-ydlu96mimsfg`（2 GiB） | 共通行と同じ | 行ごとに取得不可 |
+
+- **`rds-*` の対象クラスタ**：`catalog-db-prd`（Aurora, Writer/Reader）。
+- **`job-latency` / `job-hits` の除外**：`solidqueue::recurringjob` と `activestorage::purgejob` は劣化調査と Decide 候補から外す。
 
 ---
 

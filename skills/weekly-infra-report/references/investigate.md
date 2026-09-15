@@ -1,6 +1,8 @@
 # 調査（手順4-b〜4-d）
 
-**トリガ ON の週だけ読む。** トリガ OFF（monitor の発火なし）の週にこのファイルを読む必要はない。判定は `references/collect.md` 手順4-a。
+**トリガ ON の週だけ読む。** トリガ OFF（monitor の発火なし）の週にこのファイルを読む必要はない。判定は `collect.md` 手順4-a の decision table。
+
+ここで引くクエリは [`query-catalog.md`](query-catalog.md) の「発火時のみ取得」に登録してある（`win-latency` / `win-hits` / `win-resource` / `slow-span` / `slow-trace`）。
 
 <aside>
 ⚠️
