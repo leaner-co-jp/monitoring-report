@@ -89,7 +89,7 @@ Notion 上のレポートページの作成者は Notion インテグレーシ�
 
 ## リポジトリの位置づけ
 
-このリポジトリはコードを持たない。**エージェントへの実行指示（skill ＋ `templates/`）と、運用知識・落とし穴・改善課題（`docs/`）のドキュメント置き場**。
+このリポジトリは基本的にドキュメントの置き場である。**エージェントへの実行指示（skill ＋ `templates/`）と、運用知識・落とし穴（`docs/`）**を持つ。唯一のコードは `scripts/validate-report.py`（依存なしの検証スクリプト）で、Notion へ書き込む前に完成成果物の構造を機械的に検査する。
 
 実行指示は 2026-09-15 に Notion のプロンプト＆テンプレートページから移設し、同日**3層に分割**した（手順 = skill / レポート構成 = `templates/report.md` / 固有値 = `templates/<product>.md`）。**以降はこちらが正**で、Notion 側のページは stale。分割の狙いは、3プロダクトで約7割あった重複の解消と、トリガ OFF の週に調査手順を読み込まないことによるトークン削減（実測は [improvement-backlog.md](improvement-backlog.md) の N）。
 
@@ -99,4 +99,5 @@ Notion 上のレポートページの作成者は Notion インテグレーシ�
 - 閾値と monitor 定義 → `leaner-terraform` の `environments/datadog/`
 - 実行スケジュールとエントリプロンプト → `~/.claude/scheduled-tasks/`
 - 運用知識・改善課題 → **このリポジトリの `docs/`**
+- 出力前の構造検査 → **このリポジトリの `scripts/validate-report.py`**
 - 生成したレポートの置き場 → Notion のプロダクト別 DB（**出力先であって指示の置き場ではない**）
