@@ -59,15 +59,19 @@ Datadog と Notion を操作できる接続手段が利用環境にあること�
 
 **最初に `templates/<product>.md` を読む**（変数とブロックの供給元）。以降は必要になった時点で読む。**全部を先に読まない。**
 
-| いつ | 読むもの |
-| --- | --- |
-| 開始時（必ず） | `templates/<product>.md` |
-| 手順1〜3 に入るとき | `references/collect.md` |
-| 手順5 に入るとき | `references/metrics.md` |
-| **トリガ ON が確定したときだけ** | `references/investigate.md` ＋ `{{P:domain-notes}}` `{{P:playbook-notes}}` |
-| 色を付けるとき | `references/evaluate.md` |
-| 書き始めるとき | `templates/report.md` ＋ `references/output.md` |
-| メトリクスを取る前（必読） | `docs/datadog-mcp-tips.md` |
+| いつ | 読むもの | 目的 |
+| --- | --- | --- |
+| 開始時（必ず） | `templates/<product>.md` | 固定値・台帳・プロダクト固有注記（FJ なら `templates/fj.md`）を確認する |
+| 手順1〜3 に入るとき | `references/collect.md` | monitor・イベント・SLO の収集方法を確認する |
+| 手順5 に入るとき | `references/metrics.md` | 先週比トレンドの取得方法を確認する |
+| **トリガ ON が確定したときだけ** | `references/investigate.md` ＋ `{{P:domain-notes}}` `{{P:playbook-notes}}` | 発火ウインドウの調査方法と固有の観点を確認する |
+| 色を付けるとき | `references/evaluate.md` | 読者への対応要求の評価ルールを確認する |
+| 書き始めるとき | `templates/report.md` ＋ `references/output.md` | 構造・固定文・§2 の条件・§3 の必須項目と、書き込み直前の検証を確認する |
+| メトリクスを取る前（必読） | `docs/datadog-mcp-tips.md` | 数値取得時の落とし穴を確認する |
+
+読むときは複数ファイルを連結して一括出力したり、巨大な範囲を一度に `cat` したりしない。まず `grep -n` 等で見出しや対象ブロックの位置を把握し、次に `sed -n` 等でその目的に必要な範囲だけを読む。
+
+MCP の出力上限で応答が退避・切り詰められた場合は、退避ファイルや部分プレビューを根拠に進めない。元ファイルをより小さい範囲に分けて再読し、必要なブロックを確認してから続行する。
 
 トリガ OFF の週は `references/investigate.md` を**読まない**。これがこの分割の主な狙い。
 
