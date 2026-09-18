@@ -8,7 +8,7 @@
 | --- | --- |
 | `search_datadog_monitors` | monitor 状態の一括取得（Observe の主軸） |
 | `search_datadog_events` | アラートの発火・復旧イベントを時系列で取得 |
-| `aggregate_events` | アラートの件数・概況を軽量に集計（本文が不要なとき） |
+| `aggregate_events` | アラートの総件数を ungrouped で集計（grouping は要照合） |
 | `get_datadog_metric` | メトリクスクエリ。**先週比トレンドの補足取得のみ**に使う |
 | `get_datadog_dashboard` | ダッシュボード構成・ウィジェット値（SLO 数値の取得元） |
 | `get_datadog_metric_context` | メトリクスのタグ／メタデータ探索（必要時のみ） |
@@ -116,15 +116,25 @@ root（`rack.request`）だけでなく DB クライアント層（LP なら `se
 
 RDS Writer CPU / コネクションの critical 調査では、duration 降順検索で「その時刻に Writer 宛（`peer.hostname` が `<cluster>.cluster-…`）に出ていた重い SQL」を特定し、**悪化の主体を『実際に DB を叩いた endpoint / SQL』に置く**。同ウインドウに居るだけのジョブを主体と断定しない（p50 集約だけの相関による当て推量を避ける）。
 
-## 罠 9: monitor / event 応答のページング
+## 罠 9: `aggregate_events` の `group_by` が 0 buckets を返す
+
+`source:alert team:<team>` にイベントが存在しても、`@monitor_name` などの `group_by` は **0 buckets を返すことがある**。空の grouped 結果はイベント0件の根拠にならない。
+
+- 今週・先週とも、まず `group_by` なしの COUNT を取得する。
+- grouping を使う場合は bucket 合計を ungrouped 総件数と照合する。`@monitor_name` を含む grouping field は欠損・不安定になり得るため、空・合計不一致・不明 bucket は不完全として扱う。
+- 総件数が1件以上で grouping が不完全なら、週次レポート対象 monitor の ID（未対応なら名前）ごとに時間範囲を絞った `search_datadog_events` で Triggered を探す。team 全体の週次本文は取得しない。
+
+現在の monitor `status` は取得時点の状態にすぎず、対象ウインドウ中にアラートがなかった証拠にはならない。
+
+## 罠 10: monitor / event 応答のページング
 
 `search_datadog_monitors` は応答が truncate される。`is_truncated` が立っていたら `start_at` を進めて全件取る。**取り漏らすと「発火していない」と誤報告する。**
 
-## 罠 10: SLO の数値は MCP で直接取れない
+## 罠 11: SLO の数値は MCP で直接取れない
 
 monitor は SLO の「状態」（枯渇・急消費の有無）しか返さない。**SLI % とエラーバジェット残 % の数値を返す専用ツールがない**ため、`get_datadog_dashboard` でダッシュボードの SLO ウィジェット値を参照する。取得できなければ `⚠️ 取得不可: <理由>` と明記する（省略禁止）。
 
-## 罠 11: ダッシュボードのフル取得は重い
+## 罠 12: ダッシュボードのフル取得は重い
 
 `get_datadog_dashboard` のフル取得は LP で約 18k トークン、**FJ は約 61k 文字で MCP 応答上限を超える**。構成差分の検知（プロンプト §0.4 手順6）は毎回やらず、必要な widget に絞る。
 
@@ -133,7 +143,8 @@ monitor は SLO の「状態」（枯渇・急消費の有無）しか返さな�
 ## トークン節約の指針
 
 - monitor 状態は**1コールで一括取得**（`include_tags=["*"]`）。
-- 件数や概況だけなら `search_datadog_events` ではなく `aggregate_events`。発火ウインドウの正確な epoch が必要になったときだけ `search_datadog_events` を絞って使う。
+- 今週・先週の件数は `aggregate_events` の ungrouped COUNT を先に取り、grouping は照合済みの場合だけ候補の絞り込みに使う。
+- 発火ウインドウの正確な epoch は monitor と時間帯を限定した `search_datadog_events` で取る。
 - ダッシュボードのフル取得は避ける。
 - トリガ OFF の週は詳細トレース調査をスキップする（これが最大の節約）。
 - `get_datadog_metric` の応答に付いてくる `metrics_explorer_url` と、アラートイベント本文の埋め込みリンクは **Datadog 生成なので再利用が最も安全**。手組み URL より優先する。

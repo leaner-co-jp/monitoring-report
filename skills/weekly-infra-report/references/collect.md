@@ -57,7 +57,7 @@
 
 `search_datadog_monitors` に `query="tag:report:weekly team:{{P.team}}"`、`include_tags=["*"]` を指定し、{{P.name}}の週次レポート対象 monitor をまとめて取得する（1コール）。
 
-- monitor の `status` は**色に写さない**。`Alert` / `Warn` = 「現在発火中」、`OK` = 「現在発火なし」として**事実で記録**する（色の付け方は `references/evaluate.md`）。`No Data` は `⚠️ 取得不可` と明記する。
+- monitor の `status` は**色に写さない**。`Alert` / `Warn` = 「現在発火中」、`OK` = 「現在発火なし」として**事実で記録**する（色の付け方は `references/evaluate.md`）。`No Data` は `⚠️ 取得不可` と明記する。これは取得時点の現在状態だけを示し、`OK` でも対象ウインドウ中に発火がなかった根拠にはならない。
 
 <aside>
 ⚠️
@@ -76,24 +76,26 @@ monitor は直近10分など短いウインドウで評価するため、現在�
 
 **週全体のイベントを全件取得してはいけない。**`source:alert team:{{P.team}}` には復旧・更新・通知のイベントも大量に含まれ、想定以上に膨らんで応答上限を超える。次の2段階に分ける:
 
-### 2-a. まず件数を集計する（本文は取らない）
+### 2-a. まず総件数を集計する（本文は取らない）
 
-`aggregate_events` に `query="source:alert team:{{P.team}}"`、`from` / `to` に今週・先週をそれぞれ指定し、**monitor ごとの発火件数**を集計する。ここで取るのは「どの monitor が・今週何件・先週何件」だけ。**先週との発火件数・深刻度の差を比較**し、増減を「変化」として明示する。
+1. `aggregate_events` に `query="source:alert team:{{P.team}}"`、`from` / `to` に今週・先週をそれぞれ指定し、**`group_by` なしの COUNT を必ず先に取得**する。両方の取得が終わるまで grouped 集計を実行しない。この総件数には Warn / Triggered / Recovered などが含まれ、発火回数そのものではない。
+2. monitor ごとの grouped 集計は候補を絞るための**任意の最適化**とする。使う場合は、今週・先週ごとに bucket の件数合計を 1 の ungrouped 総件数と照合する。`@monitor_name` を含む grouping field は欠損・名称変更・facet の不安定さがあるため、空 bucket、合計不一致、不明 bucket があれば信頼しない。**grouped 集計が 0 buckets でも、イベント0件の根拠にはならない。**
+3. 該当週の ungrouped 総件数が1件以上なのに grouping が空または不完全なら、手順1で取得した `report:weekly` monitor の ID / 名前を全件列挙し、各 monitor について `search_datadog_events` で **Triggered を必ず検索**する。monitor ID で絞れる環境では ID を優先し、未対応なら完全な monitor 名にフォールバックする。日別集計などから候補日・時間帯を絞れる場合は狭め、絞れない場合も「1 monitor × 1対象ウインドウ」に限定する。**team 全体 × 週全体の本文取得には戻らない。**
 
-### 2-b. 発火があった monitor だけ詳細を取る
+### 2-b. 候補 monitor だけ詳細を取る
 
-2-a で今週の件数が1件以上あった monitor に限り、`search_datadog_events` を**その monitor 名とその時間帯に絞って**引く。絞り込みの条件:
+照合済みの grouping で候補になった monitor、または 2-a のフォールバックで見つかった monitor に限り、`search_datadog_events` を**その monitor と候補時間帯に絞って**引く。
 
-- クエリに **「Triggered」を含むイベントだけ**を対象にする（復旧・更新・通知の本文を処理しない）。
-- `from` / `to` は週全体ではなく、2-a で件数の立った日・時間帯に狭める。
-- 取れた各シグナルについて「いつ・どの monitor が・どの深刻度（Warn / Alert）で・何分鳴ったか」を事実として記録する（例: 火曜 03:00 ECS Worker メモリ Alert → 03:18 復旧）。**発火ウインドウの epoch ms は取得した時点で会話内のメモに写し取る**（手順4 の APM 調査で使う。一時ファイルからの読み直しに頼らない）。
+- Warn / Triggered / Recovered は混ぜずにそれぞれ検索・記録する。今週の **Triggered がアプリ調査トリガを ON にするイベント**であり、Warn / Recovered だけでは ON にしない。
+- 各状態遷移の UTC 時刻を JST（UTC+9）へ変換して一致を検算し、対象ウインドウとの境界も確認する。Warn → Triggered → Recovered の対応を時系列で確認し、発火から復旧までの継続時間を記録する（例: 火曜 03:00 Triggered → 03:18 Recovered、18分）。境界をまたぐ場合はその旨を明記する。
+- **発火ウインドウの epoch ms は取得した時点で会話内のメモに写し取る**（手順4 の APM 調査で使う。一時ファイルからの読み直しに頼らない）。
 
-先週については件数と深刻度の比較で足り、詳細イベントは取らない（必要になったらそのとき絞って再取得する）。
+今週・先週の Warn / Triggered の件数と深刻度を比較し、増減を「変化」として明示する。先週は比較に必要な範囲だけ取得し、本文を広く読まない。
 
 <aside>
 💡
 
-件数や時系列の概況だけが必要な場合は、本文が冗長な `search_datadog_events` ではなく `aggregate_events` での集計が軽量。発火ウインドウの正確な epoch（手順4 の APM 調査に使う）が必要になったときに限り `search_datadog_events` を絞って使うと、トークンを抑えられる。
+件数の入口は `aggregate_events` の ungrouped COUNT が軽量。grouping は照合できた場合だけ絞り込みに使い、発火ウインドウの正確な epoch は monitor と時間帯を限定した `search_datadog_events` で取る。
 
 </aside>
 
@@ -121,8 +123,7 @@ monitor は SLO の「状態」（枯渇／急消費の有無）を返すが、S
 
 以下のいずれかが**今週（集計期間内）**に該当すれば「アプリ調査トリガ ON」とする:
 
-- 手順1で `report:weekly` monitor のいずれかが Warn / Alert（現在 または 週中発火）
-- 手順2でアラートイベントが今週発生（発火 → 復旧のウインドウが取れる）
+- 手順2で今週の Triggered を確認（手順1の現在状態だけでは対象ウインドウ中の発火有無を判定しない）
 - 手順3で SLO が劣化（エラーバジェット消費の進行・バーンレート警報・SLI 低下）
 
 トリガ判定の結果（ON / OFF と根拠の monitor / event / SLO、ウインドウの epoch ms）を**テンプレート §1 の「アプリ調査トリガ」**に必ず明記する。critical シグナルがあった場合はそれを最優先で調査する。
