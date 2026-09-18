@@ -81,7 +81,7 @@ search_datadog_monitors  query="tag:report:weekly team:<lp|pu|connect>"  include
 | monitor status | レポート表記 |
 | --- | --- |
 | `Alert` / `Warn` | 現在発火中（severity をそのまま書く） |
-| `OK` | 現在発火なし |
+| `OK` | 現在発火なし（対象ウインドウ中の発火なし、ではない） |
 | `No Data` | `⚠️ 取得不可: <理由>` |
 
 ⚠️ **monitor は直近10分など短いウインドウで評価する**ので、現在の `status` だけでは週中に発生して復旧済みの一過性シグナルを取りこぼす。週次の傾向は手順4（アラートイベント）と手順7（トレンド）で補う。
@@ -90,13 +90,11 @@ search_datadog_monitors  query="tag:report:weekly team:<lp|pu|connect>"  include
 
 ## 4. アラートシグナルの収集
 
-```
-search_datadog_events  query="source:alert team:<lp|pu|connect>"  from=… to=…
-```
+今週・先週を**別々に**、まず `aggregate_events` の `group_by` なし COUNT で総件数を取る。monitor ごとの grouping は任意で、bucket 合計が総件数と一致した場合だけ候補の絞り込みに使う。`@monitor_name` などの grouping が 0 buckets でも、イベント0件とは判定しない。
 
-今週・先週を**別々に**取って比較する。各シグナルについて「いつ・どの monitor が・どの深刻度で・何分鳴ったか」を事実として記録する（例: 火曜 03:00 ECS Worker メモリ Alert → 03:18 復旧）。先週との発火件数・深刻度の差も明示する。
+総件数が1件以上で grouping が空または不完全なら、手順3の全 monitor ID（未対応なら名前）を列挙し、monitor ごとの `search_datadog_events` で Triggered を探す。候補日・時間帯が分かれば狭め、分からなくても「1 monitor × 1対象ウインドウ」に限定して、team 全体の週次本文は取得しない。
 
-トークン節約: 件数や概況だけなら `aggregate_events` のほうが軽い。**発火ウインドウの正確な epoch が必要になったときだけ** `search_datadog_events` を絞って使う。
+対象 monitor では Warn / Triggered / Recovered を別々に記録する。UTC と JST（UTC+9）の変換および対象ウインドウとの境界を検算し、発火から復旧までの時間を算出する。今週の Triggered が手順6のアプリ調査トリガを ON にする。
 
 深刻度ごとの扱い:
 
@@ -113,8 +111,7 @@ monitor は SLO の「状態」（枯渇・急消費の有無）しか返さな�
 
 以下のいずれかが今週該当すれば **ON**:
 
-- `report:weekly` monitor のいずれかが Warn / Alert（現在 または 週中発火）
-- アラートイベントが今週発生（発火 → 復旧のウインドウが取れる）
+- 今週の Triggered をイベントで確認（現在の monitor status だけでは対象ウインドウ中の発火有無を判定しない）
 - SLO が劣化（エラーバジェット消費の進行・バーンレート警報・SLI 低下）
 
 判定結果（ON / OFF、根拠の monitor / event / SLO、ウインドウの epoch ms）を **§1 の「アプリ調査トリガ」**に必ず書く（3プロダクト共通）。
