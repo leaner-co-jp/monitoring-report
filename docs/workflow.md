@@ -39,7 +39,7 @@
 2. `templates/<product>.md` を読む（変数とブロックの供給元）
 3. monitor 状態を一括取得（Observe の主軸）
 4. アラート発火イベントを収集（今週・先週）
-5. SLO の数値を補完（ダッシュボードのウィジェット値）
+5. SLO の対象週・先週の数値を Status API で取得
 6. アプリ調査トリガを判定 → ON なら発火ウインドウに絞って深掘り
 7. インフラ指標の週次値を取得（先週比トレンド用）
 8. 前週レポートを参照（先週比の引用・前回 Decide/Act の反映状況）
@@ -103,9 +103,9 @@ search_datadog_monitors  query="tag:report:weekly team:<lp|pu|connect>"  include
 
 ## 5. SLO 数値の補完
 
-monitor は SLO の「状態」（枯渇・急消費の有無）しか返さない。SLI % とエラーバジェット残 % の**数値**は返さないため、`get_datadog_dashboard` でダッシュボードの SLO ウィジェット値を参照する。
+`execute_code` から Datadog SDK の `v2.ServiceLevelObjectivesApi.getSloStatus`（`GET /api/v2/slo/{slo_id}/status`）を使う。各 SLO ID に対し、レポートと同じ対象週・先週の7日間を `fromTs` / `toTs`（epoch 秒）で別々に指定する。current / 30d の検索 status やダッシュボード値で、過去週の値を代用しない。詳細なフィールド、SDK 例、Bad events の扱いは `references/collect.md` 手順3を正とする。
 
-取得できなければ `⚠️ 取得不可: <理由>` と明記する（省略禁止）。
+一部の値を取得できなければ、そのフィールドだけ `⚠️ 取得不可: <理由>` と明記し、SLO monitor の状態・イベントを発火事実としてレポート生成を続ける。
 
 ## 6. アプリ調査トリガの判定（必須・毎週）
 
