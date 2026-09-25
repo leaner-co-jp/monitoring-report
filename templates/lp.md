@@ -166,11 +166,11 @@ ECS メモリは4サービス中の最高値を1行にまとめ、どのサー�
 
 | レイヤ | 指標 | 今週 | 先週 | 変化 | monitor発火 | 校正メモ |
 | --- | --- | --- | --- | --- | --- | --- |
-| SLO | API可用性 SLI (30d) | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` |  |
-| SLO | API可用性 EBR 残 | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` |  |
+| SLO | API可用性 SLI（対象週） | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` |  |
+| SLO | API可用性 EBR 残（対象週） | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` | `{{ raw EBR: <value> <unit>（補足） }}` |
 | SLO | API可用性 Bad events (raw) | `{{N}}` req | `{{N}}` req | `{{±%}}` | — |  |
-| SLO | APIレスポンス SLI (30d) | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` |  |
-| SLO | APIレスポンス EBR 残 | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` |  |
+| SLO | APIレスポンス SLI（対象週） | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` |  |
+| SLO | APIレスポンス EBR 残（対象週） | `{{%}}` | `{{%}}` | `{{±ppt}}` | `{{発火なし|critical N回 / N分}}` | `{{ raw EBR: <value> <unit>（補足） }}` |
 | SLO | APIレスポンス Bad events (raw) | `{{N}}` req | `{{N}}` req | `{{±%}}` | — |  |
 | アプリ | Rails リクエスト数（週計） | `{{N}}` | `{{N}}` | `{{±%}}` | — |  |
 | アプリ | Rails p50（週平均） | `{{ms}}` | `{{ms}}` | `{{±%}}` | — |  |
@@ -204,6 +204,7 @@ ECS メモリは4サービス中の最高値を1行にまとめ、どのサー�
 
 - RDS IOPS は rate メトリクスで `.as_count()` が自動適用されるため、週合計の絶対値は参考値。先週比のトレンドのみ評価する。
 - ALB は `httpcode_elb_*`（ALB レイヤ自身）のみを記録している。`httpcode_target_5xx`（アプリが返した 5xx）は Sentry 管轄のため本表には含まれない。
+- SLO Status API は raw bad-event 件数を返さない。別途検証済みの取得元がない場合、Bad events (raw) の今週・先週・変化は `⚠️ 取得不可: Status API は raw bad-event 件数を返さない` とし、raw EBR や SLI から推定しない。
 - **MultimodalAPI ECS と RDS(pg)（`prd-multimodal-api-pgvector`）は monitor が無いため判定対象外の参考値**。色を付けず、先週比のトレンドだけを評価する。このクラスタに Reader は存在しない。
 - MultimodalAPI の CPU % は **`cpu.percent / 0.5`**（= raw ×2）の正規化値。ダッシュボードの同名ウィジェットは式が誤っており（`/ 2`）真値の 1/4 を表示するので、その値を転記しない。
 </aside>
