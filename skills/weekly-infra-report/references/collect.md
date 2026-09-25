@@ -13,6 +13,9 @@
 | `search_datadog_monitors` | monitor の状態を一括取得 |
 | `aggregate_events` | アラートの件数・概況を軽量に集計（本文が不要なとき） |
 | `search_datadog_events` | アラートの発火・復旧イベントを時系列で取得 |
+| `search_datadog_slos` | SLO の名前・ID・定義を探索し、テンプレートの SLO ID を確認する。週次の SLI / EBR 値の取得には使わない |
+| `search_datadog_sdk` | SLO Status API の SDK メソッドと型を確認する（補助、必要時のみ） |
+| `execute_code` | Datadog SDK の `v2.ServiceLevelObjectivesApi.getSloStatus` を実行し、対象週・先週の SLO status を取得する |
 | `get_datadog_metric` | メトリクスクエリ。先週比トレンドの補足取得に使う。`response_format` は `timeseries`（既定）と `scalar` |
 | `get_datadog_dashboard` | ダッシュボード構成・ウィジェット値の取得 |
 | `get_datadog_metric_context` | メトリクスのタグ／メタデータ探索（補助、必要時のみ） |
@@ -108,14 +111,78 @@ monitor は直近10分など短いウインドウで評価するため、現在�
 
 ## 手順3. SLO 数値（SLI / エラーバジェット残）
 
-monitor は SLO の「状態」（枯渇／急消費の有無）を返すが、SLI % とエラーバジェット残 % の**数値**は返さない。数値は以下で補完する:
+SLI % とエラーバジェット残（EBR）% は **Datadog SLO Status API** を優先経路として取得する。Datadog SDK では `v2.ServiceLevelObjectivesApi.getSloStatus`、HTTP では `GET /api/v2/slo/{slo_id}/status` に対応する。
 
-- **ダッシュボードのフル取得で SLO 値を探してはいけない。** `get_datadog_dashboard` のフル取得は重く、応答上限超過と一時ファイル退避の主要因になったうえ、SLI / EBR / Bad events の抽出も安定しなかった。SLO 数値専用の取得経路を上から順に試し、取れた時点で止める:
-    1. **SLO 専用のツール／API が使えるならそれを使う。**（`list_datadog_skills` / `load_datadog_skill` に SLO 向けの取得手順が用意されていないか先に確認する）
-    2. 使えない場合は、ダッシュボードの全構成ではなく **SLO 対象のデータだけを引く経路**を使う（{{P.name}}の2 SLO ID に限定した `get_datadog_metric` の SLO 系メトリクスなど）。取得は SLO ごとに小さいクエリへ分ける。
-    3. それも取れない場合は、**手順1 の SLO monitor の状態を事実として採用**し、SLI % / エラーバジェット残 % は毎回明示的に `⚠️ 取得不可: <理由>` とする（推測値や前週値で埋めない）。
-- 対象 SLO ID は「対象（プロダクト固定値）」の表を参照。
-- 取得できない値は `⚠️ 取得不可: <理由>` と明記する（省略不可）。
+1. 「対象（プロダクト固定値）」にある**すべての SLO ID**を列挙する。`search_datadog_slos` は名前・ID・定義の確認にだけ使い、検索結果に含まれる current / 30d の status を週次値として転記しない。
+2. 各 SLO ID について、次の2ウインドウを**別々に** `getSloStatus` で呼ぶ。1つの SLO ID・1つのウインドウにつき1リクエストとする。
+    - 今週: `sloId=<SLO ID>`, `fromTs={{F}}`, `toTs={{T}}`
+    - 先週: `sloId=<SLO ID>`, `fromTs={{PF}}`, `toTs={{PT}}`
+3. リクエストフィールドは `sloId`、`fromTs`、`toTs`。`fromTs` / `toTs` は、このレポートで確定済みの7日間と同じ **epoch 秒**を渡す。必要な場合だけ `disableCorrections` を指定する（省略可）。今週と先週で補正条件を変えない。
+4. 各レスポンスから `sli`、`errorBudgetRemaining`、`rawErrorBudgetRemaining.{unit,value}`、`state`、`spanPrecision` を記録する。
+
+`execute_code` で JavaScript SDK を使う例（epoch 秒と SLO ID のプレースホルダーは確定済みの実値に置き換える）:
+
+```javascript
+const { client, v2 } = require("@datadog/datadog-api-client");
+
+const api = new v2.ServiceLevelObjectivesApi(client.createConfiguration());
+const sloIds = ["<SLO_ID_1>", "<SLO_ID_2>"];
+const windows = [
+  {
+    label: "thisWeek",
+    fromTs: Number("<THIS_WEEK_FROM_TS>"),
+    toTs: Number("<THIS_WEEK_TO_TS>"),
+  },
+  {
+    label: "previousWeek",
+    fromTs: Number("<PREVIOUS_WEEK_FROM_TS>"),
+    toTs: Number("<PREVIOUS_WEEK_TO_TS>"),
+  },
+];
+const statuses = [];
+
+for (const sloId of sloIds) {
+  for (const window of windows) {
+    const response = await api.getSloStatus({
+      sloId,
+      fromTs: window.fromTs,
+      toTs: window.toTs,
+      disableCorrections: false,
+    });
+    const {
+      sli,
+      errorBudgetRemaining,
+      rawErrorBudgetRemaining,
+      state,
+      spanPrecision,
+    } = response.data.attributes;
+    statuses.push({
+      sloId,
+      window: window.label,
+      sli,
+      errorBudgetRemaining,
+      rawErrorBudgetRemaining,
+      state,
+      spanPrecision,
+    });
+  }
+}
+
+statuses;
+```
+
+`execute_code` の呼び出し自体にも `telemetry.intent` を付ける。SDK のメソッドやレスポンス型を確認する必要がある場合は、先に `search_datadog_sdk` で `ServiceLevelObjectivesApi.getSloStatus` を検索する。
+
+表示・解釈は次のルールに統一する:
+
+- SLI / EBR は `30d` ではなく**レポート対象週の値**として表示し、今週と先週の差を percentage point（ppt）で示す。current / 30d の検索 status を、過去の7日間を表す値として代用しない。
+- `rawErrorBudgetRemaining` は主値にせず、レスポンスが返した `unit` を付けて補足にだけ記載する（例: `<value> <unit>`）。単位を推測・変換しない。
+- `state` と手順1・2の SLO monitor / event を発火事実の根拠にする。SLI / EBR の数値だけから monitor の発火を推定しない。
+- **Status API は raw bad-event 件数を返さない。** `rawErrorBudgetRemaining` から Bad events を逆算せず、SLI からも推定しない。別途検証済みの取得元がある場合を除き、台帳の Bad events 行は `⚠️ 取得不可: Status API は raw bad-event 件数を返さない` と明記する。
+
+**ダッシュボードのフル取得で SLO 値を探してはいけない。** `get_datadog_dashboard` のフル取得は重く、応答上限超過と一時ファイル退避の主要因になる。
+
+`search_datadog_slos`、SDK、Status API の呼び出しが失敗した場合や認可エラーになった場合も、レポート全体を止めない。取得できなかった SLO・ウインドウ・フィールドだけを `⚠️ 取得不可: <理由>` とし、取得済みの値は残す。SLO の発火事実は手順1・2の monitor 状態／イベントにフォールバックし、推測値や current / 30d 値で穴埋めせず次の手順へ進む。
 
 ---
 

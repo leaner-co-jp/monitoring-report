@@ -9,8 +9,11 @@
 | `search_datadog_monitors` | monitor 状態の一括取得（Observe の主軸） |
 | `search_datadog_events` | アラートの発火・復旧イベントを時系列で取得 |
 | `aggregate_events` | アラートの総件数を ungrouped で集計（grouping は要照合） |
+| `search_datadog_slos` | SLO の名前・ID・定義の確認（週次 status の代用にはしない） |
+| `search_datadog_sdk` | SLO Status API の SDK メソッド・型の確認 |
+| `execute_code` | SDK の `getSloStatus` で対象週・先週の SLI / EBR を取得 |
 | `get_datadog_metric` | メトリクスクエリ。**先週比トレンドの補足取得のみ**に使う |
-| `get_datadog_dashboard` | ダッシュボード構成・ウィジェット値（SLO 数値の取得元） |
+| `get_datadog_dashboard` | ダッシュボード構成・ウィジェット値（構成確認が必要な場合のみ） |
 | `get_datadog_metric_context` | メトリクスのタグ／メタデータ探索（必要時のみ） |
 | `search_datadog_spans` | 個々のスパンを duration 降順で直接列挙（外れ値検知） |
 | `get_datadog_trace` | trace_id からトレース全体の waterfall を取得し支配スパンを特定 |
@@ -130,9 +133,11 @@ RDS Writer CPU / コネクションの critical 調査では、duration 降順�
 
 `search_datadog_monitors` は応答が truncate される。`is_truncated` が立っていたら `start_at` を進めて全件取る。**取り漏らすと「発火していない」と誤報告する。**
 
-## 罠 11: SLO の数値は MCP で直接取れない
+## 罠 11: SLO 検索の current / 30d status は過去週の値ではない
 
-monitor は SLO の「状態」（枯渇・急消費の有無）しか返さない。**SLI % とエラーバジェット残 % の数値を返す専用ツールがない**ため、`get_datadog_dashboard` でダッシュボードの SLO ウィジェット値を参照する。取得できなければ `⚠️ 取得不可: <理由>` と明記する（省略禁止）。
+週次 SLI / EBR は `execute_code` から Datadog SDK の `v2.ServiceLevelObjectivesApi.getSloStatus`（`GET /api/v2/slo/{slo_id}/status`）を使い、対象週・先週の同じ7日間を `fromTs` / `toTs`（epoch 秒）で別々に取得する。SLO 検索で見える current / 30d status やダッシュボード値を、過去の週次値として代用しない。
+
+Status API は raw bad-event 件数を返さない。raw EBR や SLI から逆算せず、別途検証済みの取得元がなければ `⚠️ 取得不可: Status API は raw bad-event 件数を返さない` とする。API の失敗・認可エラーは取得できなかったフィールドだけに記録し、monitor 状態／イベントを発火事実として処理を続ける。具体的なリクエスト／レスポンスフィールドは `skills/weekly-infra-report/references/collect.md` 手順3を参照。
 
 ## 罠 12: ダッシュボードのフル取得は重い
 
