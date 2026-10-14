@@ -81,15 +81,15 @@ Claude Code のスケジュールタスクとして登録されている（`mcp_
 | `infra-report-for-lp` | `~/.claude/scheduled-tasks/infra-report-for-lp/SKILL.md` | LP のみ |
 | `create-weekly-report-for-infra-monitoring` | `~/.claude/scheduled-tasks/create-weekly-report-for-infra-monitoring/SKILL.md` | PU と FJ（サブエージェントで並列） |
 
-各 SKILL.md は**薄いエントリポイント**で、実質的な指示は本リポジトリの agent 非依存 skill（`skills/weekly-infra-report/`）とプロダクト固有値（`templates/<lp|pu|fj>.md`）にある。スケジュールタスク側の SKILL.md が持っているのは「対象ウインドウ」「重複防止」「参照先の所在」「monitor 取得クエリ」だけ。
+各 SKILL.md は**薄いエントリポイント**で、「リポジトリのルートで作業し、`skills/weekly-infra-report/SKILL.md` に従って <product> のレポートを生成する」ことだけを指示する。対象ウインドウ・重複防止・タイトル・monitor 取得クエリなどは、すべて本リポジトリの skill・`templates/`・`bin/weekly-report` が持つ。スケジュールタスク側に手順を書き足さない（二重管理になり、古いほうに従った週だけ出力が崩れる）。
 
-⚠️ **2026-09-15 時点でスケジュールタスクの SKILL.md はまだ Notion のプロンプト＆テンプレートページを参照している。** 参照先の差し替えが未了（[improvement-backlog.md](improvement-backlog.md) の M）。
+2026-10-14 に、スケジュールタスクの SKILL.md を Notion のプロンプト＆テンプレートページの参照から、本リポジトリの skill の参照に差し替えた（backlog M）。リポジトリのルートで動かすのは、`.claude/settings.json` の書き込みガード hook を効かせるため。
 
 Notion 上のレポートページの作成者は Notion インテグレーションユーザ（`notion_user-1aad872b-…`）として記録される。
 
 ## リポジトリの位置づけ
 
-このリポジトリはコードを持たない。**エージェントへの実行指示（skill ＋ `templates/`）と、運用知識・落とし穴・改善課題（`docs/`）のドキュメント置き場**。
+**エージェントへの実行指示（skill ＋ `templates/`）、レポートを機械的に組み立てて検証するスクリプト（`bin/weekly-report` ＋ `lib/`、Ruby）、運用知識・落とし穴・改善課題（`docs/`）の置き場**。スクリプトはテンプレートどおりに出力されない揺らぎを止めるために 2026-10-14 に追加した（経緯は [workflow.md](workflow.md#なぜ本文をスクリプトで組むのか)）。
 
 実行指示は 2026-09-15 に Notion のプロンプト＆テンプレートページから移設し、同日**3層に分割**した（手順 = skill / レポート構成 = `templates/report.md` / 固有値 = `templates/<product>.md`）。**以降はこちらが正**で、Notion 側のページは stale。分割の狙いは、3プロダクトで約7割あった重複の解消と、トリガ OFF の週に調査手順を読み込まないことによるトークン削減（実測は [improvement-backlog.md](improvement-backlog.md) の N）。
 

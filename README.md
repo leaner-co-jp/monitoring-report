@@ -12,6 +12,7 @@
 - **[`skills/weekly-infra-report/`](skills/weekly-infra-report/)**：3プロダクト共通の生成手順。「LP の週次レポートを生成して」と依頼するときに、Codex などのエージェントが参照するスキル。
 - **[`templates/report.md`](templates/report.md)**：共通レポートテンプレート。🔗 調査リンク、§1 総合評価、§2 調査、§3 付録からなる。
 - **[`templates/lp.md`](templates/lp.md) / [`pu.md`](templates/pu.md) / [`fj.md`](templates/fj.md)**：プロダクト固有値。共通側の `{{P.xxx}}`（変数）と `{{P:xxx}}`（ブロック）に差し込む。
+- **[`bin/weekly-report`](bin/weekly-report) / [`lib/weekly_report/`](lib/weekly_report/)**：レポートを機械的に組み立てて検証する Ruby スクリプト。エージェントは値と所見を JSON に書くだけで、構成・固定文・書式はスクリプトが決める（理由は [docs/workflow.md](docs/workflow.md#なぜ本文をスクリプトで組むのか)）。
 - **[`docs/`](docs/)**：運用上の知識と落とし穴。全体像は [docs/overview.md](docs/overview.md)、生成手順の概要は [docs/workflow.md](docs/workflow.md) にある。
 
 生成したレポートの出力先は Notion のプロダクト別データベースである。
@@ -53,33 +54,40 @@ Claude Code のプロジェクトスキル自動検出は `.claude/skills/` だ�
 ### 3. エージェントが進める流れ
 
 ```
-0. 対象ウインドウを確定（クローズ済みか確認）
+0. bin/weekly-report window で対象ウインドウとタイトルを確定（閉じていない週はエラー）
 1. 出力先 DB を作成日時 DESC で確認 → 同名ページがあれば中止
-2. monitor 状態を一括取得（Observe の主軸）
-3. アラート発火イベントを収集（今週・先週）
-4. SLO の数値を取得
-5. アプリ調査トリガを判定
+2. bin/weekly-report stub で入力 JSON の雛形を作る
+3. monitor 状態を一括取得（Observe の主軸）
+4. アラート発火イベントを収集（今週・先週）
+5. SLO の数値を取得
+6. アプリ調査トリガを判定
    └ ON なら発火ウインドウに絞って深掘り（OFF の週は調査手順を読まない）
-6. インフラ指標の週次値を取得（先週比トレンド用）
-7. 前週レポートを参照（先週比の引用・前回 Decide / Act の反映状況）
-8. 検証チェックを通してから Notion に出力
+7. インフラ指標の週次値を取得（先週比トレンド用）
+8. 前週レポートを参照（先週比の引用・前回 Decide / Act の反映状況）
+   （3〜8 の値と所見は入力 JSON に書き込む）
+9. bin/weekly-report render で完成形を組み立てて検証
+10. render が出した Notion 用の本文をそのままページにする
 ```
 
 **同名ページがすでにあれば新規作成しない。**
 その場合は findings だけを報告して終了する。
 重複判定はページタイトルの一致に依存するため、タイトルの固定部分は変更しない。
 
-### 4. 出力前に確認すること
+### 4. 出力前の検証
 
-エージェントは書き込み前に [`references/output.md`](skills/weekly-infra-report/references/output.md) の検証チェックを通す。
-人がレビューするときも同じ観点で見る。
+`bin/weekly-report render` が、完成形を組み立てたあとに次を機械的に検証する。1つでも外れたら全件を列挙して失敗し、Notion 用の本文を書き出さない（一覧は [`references/output.md`](skills/weekly-infra-report/references/output.md#検証render-が機械的に確かめること)）。
 
-- 出力に `{{P.` や `{{P:` が残っていない（テンプレート合成の取りこぼし）
 - ページタイトルが固定形式で、期間が対象ウインドウの7日間になっている
+- 見出しの並び・固定文・台帳の行がテンプレートと一致している
 - monitor の発火に色を付けていない（件数と継続時間で書いている）
-- monitor 発火がゼロの週は §2 が存在しない（「該当なし」の見出しすら出していない）
-- §3.1 の台帳のすべての行と、「校正メモ」列が埋まっている
+- 台帳に発火があれば §2 があり、発火がない週は §2 が存在しない
+- 総合ステータスと §2 の色が max ルールを満たしている
 - 取得できなかった箇所に `⚠️ 取得不可: <理由>` と理由が書かれている
+
+Claude Code では、レポート DB への書き込みを render が検証した本文だけに制限する hook（`.claude/settings.json`）も効く。
+人がレビューするときは、render が見ない判断の部分（総合ステータスの判定理由、monitor 以外で動いた指標、前回 Decide / Act の反映状況）を見る。
+
+既存のページを手で直したときは、直した Markdown を `bin/weekly-report validate <file>` にかける。
 
 ### 5. うまくいかないとき
 
@@ -90,12 +98,24 @@ Claude Code のプロジェクトスキル自動検出は `.claude/skills/` だ�
 | 応答上限を超えて生成が止まる | `references/collect.md` の「取得の原則」と「取得順と失敗時の代替」 |
 | 固定値（SLO ID やサービス名）が違う | `templates/<product>.md` の変数表と `{{P:targets}}` |
 
+## スクリプトの開発
+
+Ruby 3.3 以上で動き（3.3 / 4.0 で確認）、標準ライブラリ以外に依存しない。テストは minitest。
+
+```bash
+rake test                 # すべてのテスト
+ruby -Ilib test/renderer_test.rb
+```
+
+テンプレート（`templates/*.md`）を直したら `rake test` を流す。テストはテンプレートから入力 JSON の雛形を作り、3プロダクトとも描画と検証が通ることを確かめるので、スロットや表の行の書き損じはここで見つかる。
+
 ## テンプレートを直すとき
 
 | 直したいもの | 直す場所 |
 | --- | --- |
 | 取得手順、評価ルール、出力ルール（3プロダクト共通） | `skills/weekly-infra-report/references/` |
-| レポートの節構成とプレースホルダ | `templates/report.md` |
+| レポートの節構成とスロット（差し込み記法は `templates/report.md` 冒頭の運用ガイド） | `templates/report.md` |
+| 合成・描画・検証のロジック | `lib/weekly_report/`（直したら `rake test`） |
 | プロダクト固有の値、閾値、monitor 一覧、台帳の行 | `templates/<lp\|pu\|fj>.md` |
 | 閾値そのもの | `leaner-terraform` の `environments/datadog/` |
 

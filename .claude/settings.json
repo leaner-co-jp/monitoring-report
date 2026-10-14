@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*__notion-(create-pages|update-page)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruby \"$CLAUDE_PROJECT_DIR/bin/weekly-report\" guard"
+          }
+        ]
+      }
+    ]
+  }
+}

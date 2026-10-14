@@ -4,7 +4,7 @@
 
 ## どのファイルに何があるか
 
-レポートは**3つの層の合成**で生成される。共通側の `{{P.xxx}}`（変数）と `{{P:xxx}}`（ブロック）に、`templates/<product>.md` の値が差し込まれる。
+レポートは**3つの層の合成**で生成される。共通側の `{{P.xxx}}`（変数）と `{{P:xxx}}`（ブロック）に、`templates/<product>.md` の値が差し込まれる。**合成と本文の組み立て・検証は `bin/weekly-report`（Ruby）がやり、エージェントは入力 JSON に値と所見を書くだけ**（下の「なぜ本文をスクリプトで組むのか」）。
 
 | ファイル | 中身 | いつ読まれるか |
 | --- | --- | --- |
@@ -14,8 +14,9 @@
 | `references/metrics.md` | 手順5 の共通クエリ式（ECS の vCPU 正規化・`.rollup(avg, 3600)`・RDS・ALB） | 手順5 |
 | `references/investigate.md` | 手順4-c（トレース調査）・4-d（相関調査プレイブック） | **トリガ ON の週だけ** |
 | `references/evaluate.md` | 色の意味・総合ステータスの判定順序・severity の扱い・閾値 | 色を付けるとき |
-| `references/output.md` | 出力ルール・除外するもの・調査リンク規約・日本語表現・書き込み前の検証チェック | 書き始めるとき |
-| `templates/report.md` | レポート本体（§1 総合評価 / §2 調査 / §3 付録）と運用ガイドのトグル | 書き始めるとき |
+| `references/output.md` | 出力ルール・入力 JSON の書き方・調査リンク規約・日本語表現・render が検証すること | 入力 JSON を埋めるとき |
+| `templates/report.md` | レポート本体（§1 総合評価 / §2 調査 / §3 付録）のスロットと、各スロットの「ガイド:」 | 入力 JSON を埋めるとき（`render` も読む） |
+| `bin/weekly-report` / `lib/weekly_report/` | ウインドウ計算・合成・入力 JSON の雛形・描画・検証・Notion 形式への変換・書き込みガード | 毎回（エージェントが実行する） |
 
 `templates/<product>.md` の差し込みブロック:
 
@@ -34,29 +35,31 @@
 ## 全体の流れ
 
 ```
-0. 対象ウインドウを確定（クローズ済みか確認）
+0. `bin/weekly-report window` で対象ウインドウ・タイトルを確定（クローズ済みでなければエラー）
 1. 出力先 DB を作成日時 DESC で確認 → 同名ページがあれば中止
-2. `templates/<product>.md` を読む（変数とブロックの供給元）
+2. `templates/<product>.md` を読み、`bin/weekly-report stub` で入力 JSON を作る
 3. monitor 状態を一括取得（Observe の主軸）
 4. アラート発火イベントを収集（今週・先週）
 5. SLO の対象週・先週の数値を Status API で取得
 6. アプリ調査トリガを判定 → ON なら発火ウインドウに絞って深掘り
 7. インフラ指標の週次値を取得（先週比トレンド用）
 8. 前週レポートを参照（先週比の引用・前回 Decide/Act の反映状況）
-9. `output.md` の検証チェックを通し、`templates/report.md` の構成に沿って埋めて出力先 Notion DB にページ作成
+9. `bin/weekly-report render` で完成形を作って検証（失敗したら入力 JSON を直して再実行）
+10. render が出した `.notion.md` をそのまま出力先 Notion DB にページ作成
 ```
 
 ## 0. 対象ウインドウの確定
 
 LP は水曜〜火曜、PU・FJ は金曜〜木曜。**直近のクローズ済みの週**を取る。
 
-Unix timestamp の算出（`SKILL.md`「ウインドウ」に載っているワンライナー）:
+ウインドウ・タイトル・タイムスタンプは `bin/weekly-report window` が出す。**自分で計算しない**（以前は python のワンライナーを手で書き換えていたが、日付の打ち間違いや UTC ずれがウインドウ全体を壊す）:
 
 ```bash
-python3 -c "import datetime as dt, zoneinfo as zi; jst=zi.ZoneInfo('Asia/Tokyo'); s=dt.datetime(2026,7,22,0,0,tzinfo=jst); e=dt.datetime(2026,7,28,23,59,59,tzinfo=jst); print('F=',int(s.timestamp())); print('T=',int(e.timestamp())); print('PF=',int((s-dt.timedelta(days=7)).timestamp())); print('PT=',int((e-dt.timedelta(days=7)).timestamp()))"
+bin/weekly-report window --product lp                    # 直近のクローズ済みの週
+bin/weekly-report window --product pu --end 2026-10-08   # 過去週の補完
 ```
 
-`F` / `T` は今週、`PF` / `PT` は先週。調査リンクの `from_ts` / `to_ts` は **epoch ms**（秒を1000倍）なので取り違えないこと。
+終端曜日でない日付や、まだ閉じていない週（partial-window）を指定するとエラーになる。`window.from_s` / `to_s` は今週の Unix 秒、`*_ms` は epoch ms（調査リンクの `from_ts` / `to_ts` 用）。
 
 ## 1. 重複防止（作成より先にやる）
 
@@ -146,19 +149,26 @@ p50 / avg は単発の長時間トレース（60秒級の重い SQL など）を
 
 ## 9. 出力
 
-**書き込む前に `references/output.md` の検証チェックを全項目通す**（プレースホルダの残留・ウインドウ・重複・§1〜§3 構成・発火ゼロ週の §2 非出力・色の使い方・台帳の校正メモ・取得不可の理由・前回 Decide / Act の反映状況）。満たさない項目は書き込む前に直し、直せないものは §3.3 に理由を書く。
+1. `bin/weekly-report render tmp/weekly-report/<product>.json` を実行する。完成形を組み立て、検証し、`tmp/weekly-report/<product>-<YYYYMMDD>.md`（完成形）と `.notion.md`（Notion 用の本文）を書き出す。
+2. 失敗したら、列挙されたエラーを入力 JSON 側で直して再実行する（何を検証しているかは [`references/output.md`](../skills/weekly-infra-report/references/output.md)）。
+3. 成功したら `.notion.md` の中身をそのまま `content` に、出力の `title` をタイトルプロパティに入れてページを作成する。
 
-そのうえでテンプレート部の構成に沿ってプレースホルダを埋め、出力先 Notion DB に新規ページを作成する。
+除外するもの（運用ガイド・「ガイド:」・説明文）と残すもの（調査時の前提・台帳の注記などのドメイン文脈）の振り分けは render がやる。
 
-**出力時に必ず除外するもの**:
+## なぜ本文をスクリプトで組むのか
 
-1. `templates/report.md` 冒頭の運用ガイド（トグル）
-2. テンプレートの methodology 前置き（「monitor 駆動の OODA レポート…」等の枕文）
-3. 「ガイド:」で始まる記入指示、書き方だけを指示する注記
+テンプレートを読ませて「この構成どおりに書いて」と指示する方式では、どれだけ強く指示しても出力が週ごとに揺れた。2026-10 時点で LP の自動実行が出したレポートには、次の崩れが混在していた:
 
-**残すもの**: ドメイン文脈を伝える注記は中身なので残す。Sentry 棲み分けと IOPS 注意（§2 冒頭の「調査時の前提」と §3.1 の注記）、FJ の elb 防御シグナルなど。
+- タイトルの形式が変わる（`… 週次レポート 2026/10/07〜10/13`。重複防止の同名判定が効かなくなる）
+- 固定文の「色の意味」が言い換えられ、「評価ルール」が丸ごと落ちる
+- 台帳の行が統合・省略され、テンプレートにない「§4 収集記録」が足される
+- 総合ステータスに 🟡 が使われ、monitor 発火の列に「warning 6回（各10分）」のような独自書式が入る
 
-出力の開始位置はタイトル行（`# …`）から。前置きの引用文は付けず、そのまま `## 1` へ続ける。
+エージェントは「構成を写す」「値を集めて解釈する」を同時にやっており、前者は本来毎回同じ結果になるべき機械的な作業だった。そこで機械的な部分（ウインドウ計算・合成・固定文・節番号・§2 の有無・Notion 形式）を `bin/weekly-report` に移し、エージェントには値と所見だけを JSON で書かせる。JSON の雛形もテンプレートから生成するので、テンプレートを直せば雛形・描画・検証がすべて追従する。
+
+さらに Claude Code では、`.claude/settings.json` の PreToolUse hook（`bin/weekly-report guard`）が、レポート DB への `notion-create-pages`（とレポート本文の全置換）を **render が検証した本文と一致するものだけ**に制限する。render は検証を通った本文のハッシュを `tmp/weekly-report/approved/` に記録し、hook はそれと照合する（空行と行末の空白は無視）。手で組んだ本文や、検証後に書き換えた本文は書き込めない。
+
+hook は Claude Code 固有の仕組みなので、Codex など他のエージェントでは render の検証までが保証範囲になる。
 
 ### ページタイトル（固定形式・変更禁止）
 

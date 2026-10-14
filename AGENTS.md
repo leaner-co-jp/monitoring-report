@@ -10,6 +10,7 @@
   - **手順（3プロダクト共通）** = `skills/weekly-infra-report/`（agent 非依存の skill。`SKILL.md` ＋ `references/` 5本）
   - **レポート構成（共通）** = `templates/report.md`
   - **プロダクト固有値** = `templates/<lp|pu|fj>.md`（変数表 `{{P.xxx}}` ＋ 差し込みブロック `{{P:xxx}}`）
+- **レポート本文は手で組まない。** エージェントは `bin/weekly-report stub` の入力 JSON に値と所見を書き、`bin/weekly-report render` が合成・描画・検証して Notion 用の本文を出す。構成・固定文・節番号・§2 の有無・タイトルはスクリプトが決める（揺らぎ対策。経緯は [docs/workflow.md](docs/workflow.md#なぜ本文をスクリプトで組むのか)）。Claude Code では hook が、render が検証していない本文のレポート DB への書き込みを止める。
 - **固有値の唯一の真実は `templates/<product>.md`、手順の唯一の真実は skill 側。** 数値や固定値が食い違ったらこれらを正とし、`docs/` を直す。
 - `docs/` は `templates/` の写しではなく、**運用知識・落とし穴・改善課題の置き場**。テンプレートを直したら、関連する `docs/` の記述も同じコミットで追従させる。
 - 生成方式は **monitor 駆動の OODA**。閾値判定とスパイク検知は Datadog monitor に委譲し、エージェントは monitor 状態とアラート発火を「シグナル」として集め、Observe / Orient を厚く書く。Decide / Act は**候補提示までに留める**（決めるのは人間）。
@@ -22,8 +23,8 @@
 1. **対象ウインドウ**: LP = 水曜〜火曜 / PU・FJ = 金曜〜木曜。いずれも**直近のクローズ済みの7日間**。週クローズ前（partial-window）だと累積系メトリクスを過少計上するので生成しない。
 2. **重複防止**: 作成前に出力先 DB を作成日時 DESC で確認し、対象ウインドウの同名ページが既にあれば**新規作成しない**（findings のみ報告）。
 3. **FJ の team タグは `connect`**。`fj` では0件になる。
-4. **ページタイトルは固定形式**。可変部は `YYYY/MM/DD - MM/DD` だけ。
-5. `templates/report.md` 冒頭の「運用ガイド」トグルはレポートに含めない。**出力に `{{P.` / `{{P:` が残っていたら合成ミス**（書き込み前に確認）。
+4. **ページタイトルは固定形式**。可変部は `YYYY/MM/DD - MM/DD` だけ。自分で組み立てず `bin/weekly-report window` / `render` の出力の `title` を使う。
+5. **render が失敗したら入力 JSON を直して再実行する。** 出力 Markdown を手で直したり、本文を手で組んで Notion に書いたりして回避しない。
 6. 旧方式のローカル `*-weekly-report-template.md`、旧 AI-Agent ページ、**Notion 側の旧プロンプト＆テンプレートページ**は stale。参照しない。
 7. Datadog MCP の各呼び出しで `telemetry.intent`（英語・短く・PII なし）を必須指定。
 8. **色（🔴🟡🟢⛔）は「読者への要求（対応要否）」にのみ使う。monitor の発火状況には色を付けない** — 発火は判定ではなく事実なので、件数と継続時間で書く。判定の当て方は [docs/monitors.md](docs/monitors.md)。
@@ -36,6 +37,8 @@
 | `skills/weekly-infra-report/references/` | 共通手順。`collect` 手順1-3 / `investigate` 手順4（**トリガ ON の週だけ読む**）/ `metrics` 手順5 / `evaluate` 評価ルール / `output` 出力・検証 |
 | `templates/report.md` | 共通レポートテンプレート（§1〜§3） |
 | `templates/lp.md` / `pu.md` / `fj.md` | **プロダクト固有値のみ**（完成形テンプレートではない） |
+| `bin/weekly-report` / `lib/weekly_report/` | ウインドウ計算・合成・入力 JSON の雛形・描画・検証・Notion 形式変換・書き込みガード（Ruby。テストは `rake test`） |
+| `.claude/settings.json` | 書き込みガードの PreToolUse hook |
 | `docs/` | 運用知識・落とし穴・改善課題。上記の背景を補うもの |
 
 レポート生成は「LP の週次レポートを生成して」等で `skills/weekly-infra-report/` を起点にする。Codex を含む各エージェントは、対応する skill の自動検出がない環境ではこのパスを明示して読む。トリガ OFF（monitor 発火なし）の週は `references/investigate.md` を読まないのが分割の主な狙い。
@@ -62,7 +65,5 @@
 
 ## 現在の未解決事項（詳細は improvement-backlog.md）
 
-- **スケジュールタスクの SKILL.md がまだ Notion のプロンプト＆テンプレートページを参照している**（`~/.claude/scheduled-tasks/`）。`skills/weekly-infra-report/` を使う形への差し替えが未了（backlog M）。
-- LP のスケジュールタスクにだけ「レポートの日本語表現」の指示が入っていない。
 - **monitor の無い独自閾値が2件あった**（v2 で落とした。テンプレートに戻すのではなく monitor を作るのが正しい対処）: SLO の `EBR < 20%` と、Worker-Long の `max% で週4回以上のスパイク / 70% 超え`。いずれもダッシュボードのノートやテンプレートの Orient に書かれていただけで Datadog monitor の裏付けがない。
 - **Worker 系 ECS CPU monitor（3プロダクト共通）が瞬間値検知で校正不良**。仕様どおりの稼働が critical として発火している（backlog L）。対処は monitor の校正であって毎週の再説明ではない。

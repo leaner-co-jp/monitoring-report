@@ -1,0 +1,159 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# 週次インフラレポートの合成・描画・検証 CLI。手順は skills/weekly-infra-report/SKILL.md。
+#
+#   bin/weekly-report window   --product lp [--end 2026-10-13] [--today 2026-10-14]
+#   bin/weekly-report stub     --product lp [--end …] > tmp/weekly-report/lp.json
+#   bin/weekly-report skeleton --product lp [--end …]
+#   bin/weekly-report render   tmp/weekly-report/lp.json [--out-dir tmp/weekly-report]
+#   bin/weekly-report validate report.md
+#   bin/weekly-report guard    （Claude Code の PreToolUse hook。標準入力に hook の JSON）
+
+require "json"
+require "optparse"
+require_relative "../lib/weekly_report"
+
+module WeeklyReport
+  class CLI
+    USAGE = <<~TEXT
+      使い方: bin/weekly-report <command> [options]
+
+        window    対象ウインドウ・タイトル・出力先 DB・重複確認クエリを JSON で出す
+        stub      入力 JSON の雛形を出す（テンプレートのスロットから生成）
+        skeleton  合成済みのスケルトン（値を埋める前の完成形）を出す
+        render    入力 JSON から完成形を作って検証し、Notion 用の本文を書き出す
+        validate  完成形の Markdown を検証する
+        guard     Notion への書き込みを検証済みの本文だけに制限する hook
+    TEXT
+
+    def initialize(argv, stdin: $stdin, stdout: $stdout, stderr: $stderr)
+      @argv = argv.dup
+      @stdin = stdin
+      @stdout = stdout
+      @stderr = stderr
+    end
+
+    def run
+      command = @argv.shift
+      case command
+      when "window" then window
+      when "stub" then stub
+      when "skeleton" then skeleton
+      when "render" then render
+      when "validate" then validate
+      when "guard" then guard
+      else
+        @stderr.puts USAGE
+        command.nil? || %w[-h --help help].include?(command) ? 0 : 1
+      end
+    rescue ValidationError => e
+      @stderr.puts e.message
+      1
+    rescue Error, OptionParser::ParseError, JSON::ParserError, Date::Error => e
+      @stderr.puts "エラー: #{e.message}"
+      1
+    end
+
+    private
+
+    def options(*names)
+      opts = {}
+      parser = OptionParser.new
+      parser.on("--product CODE") { |v| opts[:product] = v } if names.include?(:product)
+      parser.on("--end DATE", "週の終端日（YYYY-MM-DD）。省略時は直近のクローズ済みの週") { |v| opts[:end] = v } if names.include?(:product)
+      parser.on("--today DATE", "今日の日付（JST）。テストと再生成用") { |v| opts[:today] = Date.iso8601(v) }
+      parser.on("--out-dir DIR") { |v| opts[:out_dir] = v } if names.include?(:out_dir)
+      parser.parse!(@argv)
+      opts
+    end
+
+    def product_and_window(opts)
+      raise Error, "--product（#{Product::CODES.join(' / ')}）を指定する" unless opts[:product]
+
+      product = Product.load(opts[:product])
+      today = opts[:today] || Window.today_jst
+      window = opts[:end] ? Window.ending(product, opts[:end], today: today) : Window.latest_closed(product, today: today)
+      [product, window]
+    end
+
+    def window
+      product, window = product_and_window(options(:product))
+      info = {
+        "product" => product.code,
+        "name" => product.var("name"),
+        "team_tag" => "team:#{product.var('team')}",
+        "title" => window.title,
+        "title_prop" => product.title_prop,
+        "output_db" => product.var("output_db"),
+        "data_source" => product.var("datasource"),
+        "duplicate_check_sql" => %(SELECT "#{product.title_prop}", "作成日時" FROM "#{product.var('datasource')}" ) +
+                                 %(ORDER BY datetime("作成日時") DESC LIMIT 3),
+        "window" => window.to_h
+      }
+      @stdout.puts JSON.pretty_generate(info)
+      0
+    end
+
+    def stub
+      product, window = product_and_window(options(:product))
+      @stdout.puts JSON.pretty_generate(Stub.new(product, window).build)
+      0
+    end
+
+    def skeleton
+      product, window = product_and_window(options(:product))
+      @stdout.print Composer.new(product).skeleton(window)
+      0
+    end
+
+    def render
+      opts = options(:out_dir)
+      input_path = @argv.shift or raise Error, "入力 JSON のパスを指定する"
+      data = JSON.parse(File.read(input_path))
+      product, window = Renderer.load_input(data, today: opts[:today] || Window.today_jst)
+      markdown = Renderer.new(product: product, window: window, data: data).render
+      notion = NotionFormatter.convert(markdown)
+
+      out_dir = opts[:out_dir] || File.join(WeeklyReport.root, "tmp", "weekly-report")
+      FileUtils.mkdir_p(out_dir)
+      base = File.join(out_dir, "#{product.code}-#{window.end_date.strftime('%Y%m%d')}")
+      File.write("#{base}.md", markdown)
+      File.write("#{base}.notion.md", notion)
+      Approval.approve!(WeeklyReport.root, content: notion, title: window.title, product: product)
+
+      @stdout.puts JSON.pretty_generate(
+        "status" => "ok",
+        "title" => window.title,
+        "title_prop" => product.title_prop,
+        "data_source_id" => product.var("datasource").delete_prefix("collection://"),
+        "markdown" => "#{base}.md",
+        "notion_content" => "#{base}.notion.md",
+        "next" => "notion_content のファイルの中身を一字一句そのまま content に、title を #{product.title_prop} に指定してページを作成する"
+      )
+      0
+    end
+
+    def validate
+      options
+      path = @argv.shift or raise Error, "検証する Markdown のパスを指定する"
+      result = Validator.new(File.read(path)).run
+      result.warnings.each { |warning| @stderr.puts "警告: #{warning}" }
+      raise ValidationError, result.errors unless result.errors.empty?
+
+      @stdout.puts "OK: #{result.window.title}"
+      0
+    end
+
+    # PreToolUse hook: 止めるときは exit 2 と標準エラーの理由（Claude Code がエージェントに返す）。
+    def guard
+      reason = Guard.new.check(JSON.parse(@stdin.read))
+      return 0 unless reason
+
+      @stderr.puts reason
+      2
+    end
+  end
+end
+
+exit WeeklyReport::CLI.new(ARGV).run if $PROGRAM_NAME == __FILE__
